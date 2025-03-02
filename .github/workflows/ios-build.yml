@@ -1,0 +1,55 @@
+name: iOS Build & Deploy to TestFlight
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build_ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "stable"
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build iOS App
+        run: |
+          flutter build ios --release --no-codesign
+          cd ios
+          pod install
+          cd ..
+
+      - name: Setup Keychain & Provisioning
+        env:
+          APP_STORE_API_KEY_ID: ${{ secrets.APP_STORE_API_KEY_ID }}
+          APP_STORE_API_KEY_ISSUER: ${{ secrets.APP_STORE_API_KEY_ISSUER }}
+          APP_STORE_API_PRIVATE_KEY: ${{ secrets.APP_STORE_API_PRIVATE_KEY }}
+        run: |
+          echo "${APP_STORE_API_PRIVATE_KEY}" > api_key.p8
+          xcodebuild -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -archivePath build/Runner.xcarchive \
+            -sdk iphoneos \
+            -configuration Release \
+            archive DEVELOPMENT_TEAM=${{ secrets.DEVELOPER_APP_ID }}
+
+      - name: Export & Upload to TestFlight
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/Runner.xcarchive \
+            -exportPath build \
+            -exportOptionsPlist ios/ExportOptions.plist
+
+          xcrun altool --upload-app -f build/Runner.ipa -t ios --apiKey ${{ secrets.APP_STORE_API_KEY_ID }} --apiIssuer ${{ secrets.APP_STORE_API_KEY_ISSUER }}
